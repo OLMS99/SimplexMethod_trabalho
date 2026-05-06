@@ -26,14 +26,11 @@ module SimplexMethod
   function initial_BFS(A, b)
     m, n = size(A)
 
-    comb = collect(combinations(1:n, m))
-    for i in length(comb):-1:1
-      b_idx = comb[i]
-      B = A[:, b_idx]
-      x_B = inv(B) * b
-      if is_nonnegative(x_B)
-        return b_idx, x_B, B
-      end
+    b_idx = n-m+1:n
+    B = A[:, b_idx]
+    x_B = inv(B) * b
+    if is_nonnegative(x_B)
+      return b_idx, x_B, B
     end
 
     error("Infeasible")
