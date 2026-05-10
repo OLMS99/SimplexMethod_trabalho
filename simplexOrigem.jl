@@ -26,6 +26,22 @@ module SimplexMethod
   function initial_BFS(A, b)
     m, n = size(A)
 
+    comb = collect(combinations(1:n, m))
+    for i in length(comb):-1:1
+      b_idx = comb[i]
+      B = A[:, b_idx]
+      x_B = inv(B) * b
+      if is_nonnegative(x_B)
+        return b_idx, x_B, B
+      end
+    end
+
+    error("Infeasible")
+  end
+
+  function initial_Origin(A, b)
+    m, n = size(A)
+
     b_idx = n-m+1:n
     B = A[:, b_idx]
     x_B = inv(B) * b
@@ -73,7 +89,8 @@ module SimplexMethod
     m, n = size(A)
 
     # Finding an initial BFS
-    b_idx, x_B, B = initial_BFS(A,b)
+    #b_idx, x_B, B = initial_BFS(A,b)
+    b_idx, x_B, B = initial_Origin(A,b)
 
     Y = inv(B) * A
     c_B = c[b_idx]
@@ -106,4 +123,57 @@ module SimplexMethod
     return opt_x, tableau.obj
   end
 
+  function add_excess_or_slack_variables!(A::Array, c::Array, flags::Array)
+
+    arraySize = length(flags)
+    newMatrixPart = zeros(arraySize,arraySize)
+
+    for _  = 1:arraySize
+      push!(c,0)
+    end
+
+    for (idx, coef) in enumerate(flags)
+      newMatrixPart[idx,idx] = coef
+    end
+
+    return c, LinearAlgebra.hcat(A, newMatrixPart)
+  end
+
+  function make_variable_list(contriction_list)
+    result = []
+    for inequation in contriction_list
+      if inequation[2] == "<="
+        push!(result,1)
+      end
+      if inequation[2] == ">="
+        push!(result,-1)
+      end
+    end
+    return result
+  end
+
+  function canonize_simplex(c, A, b, dir="MIN")
+    if uppercase(dir) == "MAX"
+      c = c * -1
+    end
+
+    extraVariables = make_variable_list(A)
+    constraint_matrix = matrix_construction(A)
+    c, canonized_A = add_excess_or_slack_variables!(constraint_matrix, c, extraVariables)
+
+    simplex_method(c, canonized_A, b)
+  end
+
+  function matrix_construction(constraints)
+    m = length(constraints)
+    n = length(constraints[1][1])
+
+    constraint_matrix = zeros(m,n)
+    for (idx,constraint) in enumerate(constraints)
+      for (idy,coef) in enumerate(constraint[1])
+        constraint_matrix[idx,idy] = coef
+      end
+    end
+    return constraint_matrix
+  end
 end
