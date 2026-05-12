@@ -1,6 +1,6 @@
 module SimplexMethod
 
-  using LinearAlgebra, Combinatorics, Printf
+  using LinearAlgebra, Printf
 
   export simplex_method, canonize_simplex
 
@@ -165,33 +165,68 @@ module SimplexMethod
     return opt_x, tableau.obj
   end
 
+  function calc_artificial_goal(A, flags)
+    W = zeros(size(A, 2))
+    num_naturais = size(A, 2) - size(flags, 1)
+
+    println("W cost initialize as:",W)
+    println("AA ", A)
+    base_idx = []
+    for (k,flag) in enumerate(flags)
+      if flag[1] == 2
+        W[num_naturais + k] -= 1
+        push!(base_idx, num_naturais + k)
+
+        j = flag[2]
+        for i in 1:size(A, 2)
+          W[i] += A[j,i]
+        end
+      end
+    end
+    println("W cost is:",W, flags)
+    return  W, base_idx
+  end
+
   function add_excess_or_slack_variables!(A::Array, c::Array, flags::Array)
 
-    arraySize = length(flags)
-    newMatrixPart = zeros(arraySize,arraySize)
+    println(A)
+    numRestrictions = size(A, 1)
+    numExtraVariables = size(flags, 1)
+    newMatrixPart = zeros(numRestrictions,numExtraVariables)
+    println(numRestrictions, ":::", numExtraVariables)
 
-    for _  = 1:arraySize
-      push!(c,0)
-    end
 
-    for (idx, coef) in enumerate(flags)
-      newMatrixPart[idx,idx] = coef
+    for (idx, flag) in enumerate(flags)
+      newMatrixPart[flag[2],idx] = clamp(1.0*flag[1],-1,1)
     end
 
     return c, LinearAlgebra.hcat(A, newMatrixPart)
   end
 
-  function make_variable_list(constriction_list)
+  function make_variable_list(B, constriction_list)
     result = []
-    for inequation in constriction_list
+    artificial = 0
+    for (i, inequation) in enumerate(constriction_list)
       if inequation[2] == "<="
-        push!(result,1)
+        push!(result,(1,i))
+        if B[i] < 0
+          push!(result, (2,i)) # variavel artificial
+          artificial = 1
+        end
       end
       if inequation[2] == ">="
-        push!(result,-1)
+        push!(result,(-1,i))
+        if B[i] > 0
+          push!(result, (2,i)) # variavel artificial
+          artificial = 1
+        end
+      end
+      if inequation[2] == "=="
+        push!(result,(2,i)) # variavel artificial
+        artificial = 1
       end
     end
-    return result
+    return result, artificial
   end
 
   function canonize_simplex(c, A, b, dir="MIN")
@@ -199,10 +234,22 @@ module SimplexMethod
       c = c * -1
     end
 
-    extraVariables = make_variable_list(A)
-    constraint_matrix = matrix_construction(A)
-    c, canonized_A = add_excess_or_slack_variables!(constraint_matrix, c, extraVariables)
+    extraVariables, artificial = make_variable_list(b, A)
+    println("List complete", extraVariables)
 
+    constraint_matrix = matrix_construction(A)
+    println("Constraint matrix built", constraint_matrix)
+
+    c, canonized_A = add_excess_or_slack_variables!(constraint_matrix, c, extraVariables)
+    println("Constraint matrix cannonized", canonized_A)
+
+    if artificial == 1
+      print("Creating artificial objective")
+      W, idx = calc_artificial_goal(canonized_A, extraVariables)
+      simplex_method(c, canonized_A, b)
+    end
+
+    return canonized_A
     simplex_method(c, canonized_A, b)
   end
 
