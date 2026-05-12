@@ -36,10 +36,11 @@ module SimplexMethod
     error("Infeasible")
   end
 
-  function initial_Origin(A, b)
+  function initial_Origin(A, b, base_idx)
     m, n = size(A)
 
-    b_idx = n-m+1:n
+    #b_idx = n-m+1:n
+    b_idx = base_idx
     B = A[:, b_idx]
     x_B = inv(B) * b
     if is_nonnegative(x_B)
@@ -123,16 +124,17 @@ module SimplexMethod
     return entering, exiting
   end
 
-  function initialize(c, A, b)
+  function initialize(c, A, b, base_idx)
     c = Array{Float64}(c)
     A = Array{Float64}(A)
     b = Array{Float64}(b)
 
+    base_idx = Array{Int}(base_idx)
     m, n = size(A)
 
     # Finding an initial BFS
     #b_idx, x_B, B = initial_BFS(A,b)
-    b_idx, x_B, B = initial_Origin(A,b)
+    b_idx, x_B, B = initial_Origin(A,b,base_idx)
 
     Y = inv(B) * A
     c_B = c[b_idx]
@@ -150,8 +152,8 @@ module SimplexMethod
     return is_nonpositive(t.z_c)
   end
 
-  function simplex_method(c, A, b)
-    tableau = initialize(c, A, b)
+  function simplex_method(c, A, b, base_idx)
+    tableau = initialize(c, A, b, base_idx)
     print_tableau(tableau)
 
     while !is_optimal(tableau)
@@ -169,34 +171,27 @@ module SimplexMethod
     W = zeros(size(A, 2))
     num_naturais = size(A, 2) - size(flags, 1)
 
-    println("W cost initialize as:",W)
-    println("AA ", A)
-    base_idx = []
     for (k,flag) in enumerate(flags)
       if flag[1] == 2
-        W[num_naturais + k] -= 1
-        push!(base_idx, num_naturais + k)
+        W[num_naturais + k] += 1
 
         j = flag[2]
         for i in 1:size(A, 2)
-          W[i] += A[j,i]
+          W[i] -= A[j,i]
         end
       end
     end
-    println("W cost is:",W, flags)
-    return  W, base_idx
+    return  W
   end
 
   function add_excess_or_slack_variables!(A::Array, c::Array, flags::Array)
 
-    println(A)
     numRestrictions = size(A, 1)
     numExtraVariables = size(flags, 1)
     newMatrixPart = zeros(numRestrictions,numExtraVariables)
-    println(numRestrictions, ":::", numExtraVariables)
-
 
     for (idx, flag) in enumerate(flags)
+      push!(c, 0)
       newMatrixPart[flag[2],idx] = clamp(1.0*flag[1],-1,1)
     end
 
@@ -206,6 +201,9 @@ module SimplexMethod
   function make_variable_list(B, constriction_list)
     result = []
     artificial = 0
+
+    num_natural_var = length(constriction_list[1][1])
+    base_idx = []
     for (i, inequation) in enumerate(constriction_list)
       if inequation[2] == "<="
         push!(result,(1,i))
@@ -225,8 +223,10 @@ module SimplexMethod
         push!(result,(2,i)) # variavel artificial
         artificial = 1
       end
+      push!(base_idx, num_natural_var + length(result))
     end
-    return result, artificial
+
+    return result, artificial, base_idx
   end
 
   function canonize_simplex(c, A, b, dir="MIN")
@@ -234,23 +234,23 @@ module SimplexMethod
       c = c * -1
     end
 
-    extraVariables, artificial = make_variable_list(b, A)
-    println("List complete", extraVariables)
+    extraVariables, artificial, base_idx = make_variable_list(b, A)
 
     constraint_matrix = matrix_construction(A)
-    println("Constraint matrix built", constraint_matrix)
 
     c, canonized_A = add_excess_or_slack_variables!(constraint_matrix, c, extraVariables)
-    println("Constraint matrix cannonized", canonized_A)
 
     if artificial == 1
-      print("Creating artificial objective")
-      W, idx = calc_artificial_goal(canonized_A, extraVariables)
-      simplex_method(c, canonized_A, b)
+      W = calc_artificial_goal(canonized_A, extraVariables)
+      println("Simplex de duas fases, minimizando obtejivo artificial W:", W)
+      println("")
+      obj1, obj = simplex_method(W, canonized_A, b, base_idx)
+      println(obj1, obj)
+
+      ## c, base_idx = update_c(c, canonized_A)
     end
 
-    return canonized_A
-    simplex_method(c, canonized_A, b)
+    simplex_method(c, canonized_A, b, base_idx)
   end
 
   function matrix_construction(constraints)
