@@ -183,9 +183,7 @@ module SimplexMethod
 
   function make_variable_list(constriction_list)
     result = []
-    println(constriction_list)
     for inequation in constriction_list
-      println(inequation[2])
       if inequation[2] == "<="
         push!(result,1)
       end
