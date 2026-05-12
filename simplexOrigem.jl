@@ -2,7 +2,7 @@ module SimplexMethod
 
   using LinearAlgebra, Combinatorics, Printf
 
-  export simplex_method
+  export simplex_method, canonize_simplex
 
   mutable struct SimplexTableau
     z_c     ::Array{Float64} # z_j - c_j
@@ -18,9 +18,6 @@ module SimplexMethod
 
   function is_nonpositive(z::Array)
     return length( z[ z .> 0] ) == 0
-  end
-
-  function add_excess_or_slack_variables(A::Array, b::Vector)
   end
 
   function initial_BFS(A, b)
@@ -81,6 +78,51 @@ module SimplexMethod
     println(hline)
   end
 
+  function pivoting!(t::SimplexTableau)
+    m, n = size(t.Y)
+
+    entering, exiting = pivot_point(t)
+    println("Pivoting: entering = x_$entering, exiting = x_$(t.b_idx[exiting])")
+
+    # Pivoting: exiting-row, entering-column
+    # updating exiting-row
+    coef = t.Y[exiting, entering]
+    t.Y[exiting, :] /= coef
+    t.x_B[exiting] /= coef
+
+    # updating other rows of Y
+    for i in setdiff(1:m, exiting)
+      coef = t.Y[i, entering]
+      t.Y[i, :] -= coef * t.Y[exiting, :]
+      t.x_B[i] -= coef * t.x_B[exiting]
+    end
+
+    # updating the row for the reduced costs
+    coef = t.z_c[entering]
+    t.z_c -= coef * t.Y[exiting, :]'
+    t.obj -= coef * t.x_B[exiting]
+
+    # Updating b_idx
+    t.b_idx[ findfirst(t.b_idx .== t.b_idx[exiting]) ] = entering
+  end
+
+  function pivot_point(t::SimplexTableau)
+    # Finding the entering variable index
+    entering = findfirst( t.z_c .> 0)[2]
+    if entering == 0
+      error("Optimal")
+    end
+
+    # min ratio test / finding the exiting variable index
+    pos_idx = findall( t.Y[:, entering] .> 0 )
+    if length(pos_idx) == 0
+      error("Unbounded")
+    end
+    exiting = pos_idx[ argmin( t.x_B[pos_idx] ./ t.Y[pos_idx, entering] ) ]
+
+    return entering, exiting
+  end
+
   function initialize(c, A, b)
     c = Array{Float64}(c)
     A = Array{Float64}(A)
@@ -139,9 +181,11 @@ module SimplexMethod
     return c, LinearAlgebra.hcat(A, newMatrixPart)
   end
 
-  function make_variable_list(contriction_list)
+  function make_variable_list(constriction_list)
     result = []
-    for inequation in contriction_list
+    println(constriction_list)
+    for inequation in constriction_list
+      println(inequation[2])
       if inequation[2] == "<="
         push!(result,1)
       end
