@@ -12,6 +12,33 @@ module SimplexMethod
     b_idx   ::Array{Int64}   # indices for basic variables x_B
   end
 
+  function update(c, tableau, artificial)
+    artificial = Array{Int}(artificial)
+    tableau.Y[:, artificial] .= 0 ## zerando coeficientes de variaveis artificial (mais barato que tirar da matriz)
+
+    if length(intersect(artificial, tableau.b_idx)) > 0
+      error("Infeasible")
+    end
+    
+    c = Array{Float64}(c)
+    obj = 0
+    for idx in tableau.b_idx
+      coef = c[idx]
+      row = 1
+      for (row, x) in enumerate(tableau.Y[:, idx])
+        if x == 1.0
+          break
+        end
+      end
+
+      obj += coef*tableau.x_B[row]
+      for (j,x) in enumerate(tableau.Y[row, :])
+        c[j] -= coef*x
+      end
+    end
+
+    return c, tableau.Y, tableau.x_B, tableau.b_idx, obj
+  end
   function is_nonnegative(x::Vector)
     return length( x[ x .< 0] ) == 0
   end
@@ -152,8 +179,9 @@ module SimplexMethod
     return is_nonpositive(t.z_c)
   end
 
-  function simplex_method(c, A, b, base_idx)
+  function simplex_method(c, A, b, base_idx, obj = 0.0)
     tableau = initialize(c, A, b, base_idx)
+    tableau.obj += obj
     print_tableau(tableau)
 
     while !is_optimal(tableau)
@@ -164,7 +192,8 @@ module SimplexMethod
     opt_x = zeros(length(c))
     opt_x[tableau.b_idx] = tableau.x_B
 
-    return opt_x, tableau.obj
+    
+    return tableau
   end
 
   function calc_artificial_goal(A, flags)
@@ -200,7 +229,7 @@ module SimplexMethod
 
   function make_variable_list(B, constriction_list)
     result = []
-    artificial = 0
+    artificial = []
 
     num_natural_var = length(constriction_list[1][1])
     base_idx = []
@@ -209,19 +238,19 @@ module SimplexMethod
         push!(result,(1,i))
         if B[i] < 0
           push!(result, (2,i)) # variavel artificial
-          artificial = 1
+          push!(artificial, num_natural_var + length(result))
         end
       end
       if inequation[2] == ">="
         push!(result,(-1,i))
         if B[i] > 0
           push!(result, (2,i)) # variavel artificial
-          artificial = 1
+          push!(artificial, num_natural_var + length(result))
         end
       end
       if inequation[2] == "=="
         push!(result,(2,i)) # variavel artificial
-        artificial = 1
+        push!(artificial, num_natural_var + length(result))
       end
       push!(base_idx, num_natural_var + length(result))
     end
@@ -230,9 +259,12 @@ module SimplexMethod
   end
 
   function canonize_simplex(c, A, b, dir="MIN")
+    direction = 1
     if uppercase(dir) == "MAX"
-      c = c * -1
+      global direction = -1
     end
+
+    c = c * direction
 
     extraVariables, artificial, base_idx = make_variable_list(b, A)
 
@@ -240,17 +272,18 @@ module SimplexMethod
 
     c, canonized_A = add_excess_or_slack_variables!(constraint_matrix, c, extraVariables)
 
-    if artificial == 1
+    obj = 0
+    if length(artificial) > 0
       W = calc_artificial_goal(canonized_A, extraVariables)
       println("Simplex de duas fases, minimizando obtejivo artificial W:", W)
-      println("")
-      obj1, obj = simplex_method(W, canonized_A, b, base_idx)
-      println(obj1, obj)
-
-      ## c, base_idx = update_c(c, canonized_A)
+      println("Variaveis artificiais: ", artificial)
+      tableau = simplex_method(W, canonized_A, b, base_idx)
+      c, canonized_A, b, base_idx, obj = update(c, tableau, artificial)
+      println("Iniciando segunda fase do simplex de duas fases")
     end
 
-    simplex_method(c, canonized_A, b, base_idx)
+    tableau = simplex_method(c, canonized_A, b, base_idx, obj)
+    return tableau.obj * direction
   end
 
   function matrix_construction(constraints)
