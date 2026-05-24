@@ -1,8 +1,8 @@
 module SimplexMethod
 
-  using LinearAlgebra, Combinatorics, Printf
+  using LinearAlgebra, Printf
 
-  export simplex_method
+  export simplex_method, canonize_simplex
 
   mutable struct SimplexTableau
     z_c     ::Array{Float64} # z_j - c_j
@@ -12,15 +12,39 @@ module SimplexMethod
     b_idx   ::Array{Int64}   # indices for basic variables x_B
   end
 
+  function update(c, tableau, artificial)
+    artificial = Array{Int}(artificial)
+    tableau.Y[:, artificial] .= 0 ## zerando coeficientes de variaveis artificial (mais barato que tirar da matriz)
+
+    if length(intersect(artificial, tableau.b_idx)) > 0
+      error("Infeasible")
+    end
+    
+    c = Array{Float64}(c)
+    obj = 0
+    for idx in tableau.b_idx
+      coef = c[idx]
+      row = 1
+      for (row, x) in enumerate(tableau.Y[:, idx])
+        if x == 1.0
+          break
+        end
+      end
+
+      obj += coef*tableau.x_B[row]
+      for (j,x) in enumerate(tableau.Y[row, :])
+        c[j] -= coef*x
+      end
+    end
+
+    return c, tableau.Y, tableau.x_B, tableau.b_idx, obj
+  end
   function is_nonnegative(x::Vector)
     return length( x[ x .< 0] ) == 0
   end
 
   function is_nonpositive(z::Array)
     return length( z[ z .> 0] ) == 0
-  end
-
-  function add_excess_or_slack_variables(A::Array, b::Vector)
   end
 
   function initial_BFS(A, b)
@@ -39,10 +63,11 @@ module SimplexMethod
     error("Infeasible")
   end
 
-  function initial_Origin(A, b)
+  function initial_Origin(A, b, base_idx)
     m, n = size(A)
 
-    b_idx = n-m+1:n
+    #b_idx = n-m+1:n
+    b_idx = base_idx
     B = A[:, b_idx]
     x_B = inv(B) * b
     if is_nonnegative(x_B)
@@ -81,16 +106,62 @@ module SimplexMethod
     println(hline)
   end
 
-  function initialize(c, A, b)
+  function pivoting!(t::SimplexTableau)
+    m, n = size(t.Y)
+
+    entering, exiting = pivot_point(t)
+    println("Pivoting: entering = x_$entering, exiting = x_$(t.b_idx[exiting])")
+
+    # Pivoting: exiting-row, entering-column
+    # updating exiting-row
+    coef = t.Y[exiting, entering]
+    t.Y[exiting, :] /= coef
+    t.x_B[exiting] /= coef
+
+    # updating other rows of Y
+    for i in setdiff(1:m, exiting)
+      coef = t.Y[i, entering]
+      t.Y[i, :] -= coef * t.Y[exiting, :]
+      t.x_B[i] -= coef * t.x_B[exiting]
+    end
+
+    # updating the row for the reduced costs
+    coef = t.z_c[entering]
+    t.z_c -= coef * t.Y[exiting, :]'
+    t.obj -= coef * t.x_B[exiting]
+
+    # Updating b_idx
+    t.b_idx[ findfirst(t.b_idx .== t.b_idx[exiting]) ] = entering
+  end
+
+  function pivot_point(t::SimplexTableau)
+    # Finding the entering variable index
+    entering = findfirst( t.z_c .> 0)[2]
+    if entering == 0
+      error("Optimal")
+    end
+
+    # min ratio test / finding the exiting variable index
+    pos_idx = findall( t.Y[:, entering] .> 0 )
+    if length(pos_idx) == 0
+      error("Unbounded")
+    end
+    exiting = pos_idx[ argmin( t.x_B[pos_idx] ./ t.Y[pos_idx, entering] ) ]
+
+    return entering, exiting
+  end
+
+  function initialize(c, A, b, base_idx)
     c = Array{Float64}(c)
     A = Array{Float64}(A)
     b = Array{Float64}(b)
 
+    base_idx = Array{Int}(base_idx)
     m, n = size(A)
 
     # Finding an initial BFS
     #b_idx, x_B, B = initial_BFS(A,b)
-    b_idx, x_B, B = initial_Origin(A,b)
+    b_idx, x_B, B = initial_Origin(A,b,base_idx)
 
     Y = inv(B) * A
     c_B = c[b_idx]
@@ -108,8 +179,9 @@ module SimplexMethod
     return is_nonpositive(t.z_c)
   end
 
-  function simplex_method(c, A, b)
-    tableau = initialize(c, A, b)
+  function simplex_method(c, A, b, base_idx, obj = 0.0)
+    tableau = initialize(c, A, b, base_idx)
+    tableau.obj += obj
     print_tableau(tableau)
 
     while !is_optimal(tableau)
@@ -120,48 +192,98 @@ module SimplexMethod
     opt_x = zeros(length(c))
     opt_x[tableau.b_idx] = tableau.x_B
 
-    return opt_x, tableau.obj
+    
+    return tableau
+  end
+
+  function calc_artificial_goal(A, flags)
+    W = zeros(size(A, 2))
+    num_naturais = size(A, 2) - size(flags, 1)
+
+    for (k,flag) in enumerate(flags)
+      if flag[1] == 2
+        W[num_naturais + k] += 1
+
+        j = flag[2]
+        for i in 1:size(A, 2)
+          W[i] -= A[j,i]
+        end
+      end
+    end
+    return  W
   end
 
   function add_excess_or_slack_variables!(A::Array, c::Array, flags::Array)
 
-    arraySize = length(flags)
-    newMatrixPart = zeros(arraySize,arraySize)
+    numRestrictions = size(A, 1)
+    numExtraVariables = size(flags, 1)
+    newMatrixPart = zeros(numRestrictions,numExtraVariables)
 
-    for _  = 1:arraySize
-      push!(c,0)
-    end
-
-    for (idx, coef) in enumerate(flags)
-      newMatrixPart[idx,idx] = coef
+    for (idx, flag) in enumerate(flags)
+      push!(c, 0)
+      newMatrixPart[flag[2],idx] = clamp(1.0*flag[1],-1,1)
     end
 
     return c, LinearAlgebra.hcat(A, newMatrixPart)
   end
 
-  function make_variable_list(contriction_list)
+  function make_variable_list(B, constriction_list)
     result = []
-    for inequation in contriction_list
+    artificial = []
+
+    num_natural_var = length(constriction_list[1][1])
+    base_idx = []
+    for (i, inequation) in enumerate(constriction_list)
       if inequation[2] == "<="
-        push!(result,1)
+        push!(result,(1,i))
+        if B[i] < 0
+          push!(result, (2,i)) # variavel artificial
+          push!(artificial, num_natural_var + length(result))
+        end
       end
       if inequation[2] == ">="
-        push!(result,-1)
+        push!(result,(-1,i))
+        if B[i] > 0
+          push!(result, (2,i)) # variavel artificial
+          push!(artificial, num_natural_var + length(result))
+        end
       end
+      if inequation[2] == "=="
+        push!(result,(2,i)) # variavel artificial
+        push!(artificial, num_natural_var + length(result))
+      end
+      push!(base_idx, num_natural_var + length(result))
     end
-    return result
+
+    return result, artificial, base_idx
   end
 
   function canonize_simplex(c, A, b, dir="MIN")
+    direction = 1
     if uppercase(dir) == "MAX"
-      c = c * -1
+      global direction = -1
     end
 
-    extraVariables = make_variable_list(A)
+    c = c * direction
+
+    extraVariables, artificial, base_idx = make_variable_list(b, A)
+
     constraint_matrix = matrix_construction(A)
+
     c, canonized_A = add_excess_or_slack_variables!(constraint_matrix, c, extraVariables)
 
-    simplex_method(c, canonized_A, b)
+    obj = 0
+    if length(artificial) > 0
+      W = calc_artificial_goal(canonized_A, extraVariables)
+      println("Simplex de duas fases, minimizando obtejivo artificial W:", W)
+      println("Variaveis artificiais: ", artificial)
+      tableau = simplex_method(W, canonized_A, b, base_idx)
+      c, canonized_A, b, base_idx, obj = update(c, tableau, artificial)
+      println("Iniciando segunda fase do simplex de duas fases")
+    end
+
+    tableau = simplex_method(c, canonized_A, b, base_idx, obj)
+    return tableau.obj * direction
   end
 
   function matrix_construction(constraints)
