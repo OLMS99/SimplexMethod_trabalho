@@ -106,6 +106,23 @@ module SimplexMethod
     println(hline)
   end
 
+  function pivot_point(t::SimplexTableau)
+    # Finding the entering variable index
+    entering = findfirst( t.z_c .> 0)[2]
+    if entering == 0
+      error("Optimal")
+    end
+
+    # min ratio test / finding the exiting variable index
+    pos_idx = findall( t.Y[:, entering] .> 0 )
+    if length(pos_idx) == 0
+      error("Unbounded")
+    end
+    exiting = pos_idx[ argmin( t.x_B[pos_idx] ./ t.Y[pos_idx, entering] ) ]
+
+    return entering, exiting
+  end
+
   function pivoting!(t::SimplexTableau)
     m, n = size(t.Y)
 
@@ -132,23 +149,6 @@ module SimplexMethod
 
     # Updating b_idx
     t.b_idx[ findfirst(t.b_idx .== t.b_idx[exiting]) ] = entering
-  end
-
-  function pivot_point(t::SimplexTableau)
-    # Finding the entering variable index
-    entering = findfirst( t.z_c .> 0)[2]
-    if entering == 0
-      error("Optimal")
-    end
-
-    # min ratio test / finding the exiting variable index
-    pos_idx = findall( t.Y[:, entering] .> 0 )
-    if length(pos_idx) == 0
-      error("Unbounded")
-    end
-    exiting = pos_idx[ argmin( t.x_B[pos_idx] ./ t.Y[pos_idx, entering] ) ]
-
-    return entering, exiting
   end
 
   function initialize(c, A, b, base_idx)
@@ -179,7 +179,7 @@ module SimplexMethod
     return is_nonpositive(t.z_c)
   end
 
-  function simplex_method(c, A, b, base_idx, obj = 0.0)
+  function solve_simplex(c, A, b, base_idx, obj = 0.0)
     tableau = initialize(c, A, b, base_idx)
     tableau.obj += obj
     print_tableau(tableau)
@@ -196,19 +196,10 @@ module SimplexMethod
     return tableau
   end
 
-  function calc_artificial_goal(A, flags)
+  function calc_artificial_goal(A, artificial)
     W = zeros(size(A, 2))
-    num_naturais = size(A, 2) - size(flags, 1)
-
-    for (k,flag) in enumerate(flags)
-      if flag[1] == 2
-        W[num_naturais + k] += 1
-
-        j = flag[2]
-        for i in 1:size(A, 2)
-          W[i] -= A[j,i]
-        end
-      end
+    for idx in artificial
+      W[idx] = -1
     end
     return  W
   end
@@ -258,7 +249,17 @@ module SimplexMethod
     return result, artificial, base_idx
   end
 
-  function canonize_simplex(c, A, b, dir="MIN")
+  function canonize_simplex(c, A, b)
+    extraVariables, artificial, base_idx = make_variable_list(b, A)
+
+    constraint_matrix = matrix_construction(A)
+
+    c, canonized_A = add_excess_or_slack_variables!(constraint_matrix, c, extraVariables)
+
+    return c, canonized_A, artificial, base_idx
+  end
+
+  function simplex_method(c, A, b, dir = "MAX", canonize = true, artificial = [], base_idx = [])
     direction = 1
     if uppercase(dir) == "MAX"
       global direction = -1
@@ -266,23 +267,24 @@ module SimplexMethod
 
     c = c * direction
 
-    extraVariables, artificial, base_idx = make_variable_list(b, A)
-
-    constraint_matrix = matrix_construction(A)
-
-    c, canonized_A = add_excess_or_slack_variables!(constraint_matrix, c, extraVariables)
+    if canonize == true
+      println("Transformando o simplex para versão canônica")
+      c, A, artificial, base_idx = canonize_simplex(c, A, b)
+    end
 
     obj = 0
     if length(artificial) > 0
-      W = calc_artificial_goal(canonized_A, extraVariables)
+      W = calc_artificial_goal(A, artificial)
       println("Simplex de duas fases, minimizando obtejivo artificial W:", W)
       println("Variaveis artificiais: ", artificial)
-      tableau = simplex_method(W, canonized_A, b, base_idx)
-      c, canonized_A, b, base_idx, obj = update(c, tableau, artificial)
+      println("Base Inicial: ", base_idx)
+      tableau = solve_simplex(W, A, b, base_idx)
+      println("Primeira fase resolvida")
+      c, A, b, base_idx, obj = update(c, tableau, artificial)
       println("Iniciando segunda fase do simplex de duas fases")
     end
 
-    tableau = simplex_method(c, canonized_A, b, base_idx, obj)
+    tableau = solve_simplex(c, A, b, base_idx, obj)
     return tableau.obj * direction
   end
 
