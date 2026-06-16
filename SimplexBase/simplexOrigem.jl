@@ -217,48 +217,48 @@ module SimplexMethod
     return c, LinearAlgebra.hcat(A, newMatrixPart)
   end
 
-  function make_variable_list(B, constriction_list)
+  function make_variable_list(B, eqs, num_var)
     result = []
     artificial = []
 
-    num_natural_var = length(constriction_list[1][1])
     base_idx = []
-    for (i, inequation) in enumerate(constriction_list)
-      if inequation[2] == "<="
+    for (i, inequation) in enumerate(eqs)
+      if inequation == "<="
         push!(result,(1,i))
         if B[i] < 0
           push!(result, (2,i)) # variavel artificial
-          push!(artificial, num_natural_var + length(result))
+          push!(artificial, num_var + length(result))
         end
       end
-      if inequation[2] == ">="
+      if inequation == ">="
         push!(result,(-1,i))
         if B[i] > 0
           push!(result, (2,i)) # variavel artificial
-          push!(artificial, num_natural_var + length(result))
+          push!(artificial, num_var + length(result))
         end
       end
-      if inequation[2] == "=="
+      if inequation == "=="
         push!(result,(2,i)) # variavel artificial
-        push!(artificial, num_natural_var + length(result))
+        push!(artificial, num_var + length(result))
       end
-      push!(base_idx, num_natural_var + length(result))
+      push!(base_idx, num_var + length(result))
     end
 
     return result, artificial, base_idx
   end
 
-  function canonize_simplex(c, A, b)
-    extraVariables, artificial, base_idx = make_variable_list(b, A)
+  function canonize_simplex(c, A, b, eqs)
+    extraVariables, artificial, base_idx = make_variable_list(b, eqs, length(c))
 
-    constraint_matrix = matrix_construction(A)
+    #constraint_matrix = matrix_construction(A)
+    constraint_matrix = A
 
     c, canonized_A = add_excess_or_slack_variables!(constraint_matrix, c, extraVariables)
 
     return c, canonized_A, artificial, base_idx
   end
 
-  function simplex_method(c, A, b, dir = "MAX", verbose = true, canonize = true, artificial = [], base_idx = [])
+  function simplex_method(c, A, b, eqs, dir = "MAX", verbose = true, canonize = true, artificial = [], base_idx = [])
     direction = 1
     if uppercase(dir) == "MAX"
       global direction = -1
@@ -268,7 +268,7 @@ module SimplexMethod
 
     if canonize == true
       verbose && println("Transformando o simplex para versão canônica")
-      c, A, artificial, base_idx = canonize_simplex(c, A, b)
+      c, A, artificial, base_idx = canonize_simplex(c, A, b, eqs)
     end
 
     obj = 0
