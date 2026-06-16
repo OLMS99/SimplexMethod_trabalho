@@ -123,11 +123,11 @@ module SimplexMethod
     return entering, exiting
   end
 
-  function pivoting!(t::SimplexTableau)
+  function pivoting!(t::SimplexTableau, verbose::Bool)
     m, n = size(t.Y)
 
     entering, exiting = pivot_point(t)
-    println("Pivoting: entering = x_$entering, exiting = x_$(t.b_idx[exiting])")
+    verbose && println("Pivoting: entering = x_$entering, exiting = x_$(t.b_idx[exiting])")
 
     # Pivoting: exiting-row, entering-column
     # updating exiting-row
@@ -179,27 +179,26 @@ module SimplexMethod
     return is_nonpositive(t.z_c)
   end
 
-  function solve_simplex(c, A, b, base_idx, obj = 0.0)
+  function solve_simplex(c, A, b, base_idx, verbose, obj = 0.0)
     tableau = initialize(c, A, b, base_idx)
     tableau.obj += obj
-    print_tableau(tableau)
+    verbose && print_tableau(tableau)
 
     while !is_optimal(tableau)
-      pivoting!(tableau)
-      print_tableau(tableau)
+      pivoting!(tableau, verbose)
+      verbose && print_tableau(tableau)
     end
 
     opt_x = zeros(length(c))
     opt_x[tableau.b_idx] = tableau.x_B
 
-    
     return tableau
   end
 
   function calc_artificial_goal(A, artificial)
     W = zeros(size(A, 2))
     for idx in artificial
-      W[idx] = -1
+      W[idx] = 1
     end
     return  W
   end
@@ -259,7 +258,7 @@ module SimplexMethod
     return c, canonized_A, artificial, base_idx
   end
 
-  function simplex_method(c, A, b, dir = "MAX", canonize = true, artificial = [], base_idx = [])
+  function simplex_method(c, A, b, dir = "MAX", verbose = true, canonize = true, artificial = [], base_idx = [])
     direction = 1
     if uppercase(dir) == "MAX"
       global direction = -1
@@ -268,23 +267,23 @@ module SimplexMethod
     c = c * direction
 
     if canonize == true
-      println("Transformando o simplex para versão canônica")
+      verbose && println("Transformando o simplex para versão canônica")
       c, A, artificial, base_idx = canonize_simplex(c, A, b)
     end
 
     obj = 0
     if length(artificial) > 0
       W = calc_artificial_goal(A, artificial)
-      println("Simplex de duas fases, minimizando obtejivo artificial W:", W)
-      println("Variaveis artificiais: ", artificial)
-      println("Base Inicial: ", base_idx)
-      tableau = solve_simplex(W, A, b, base_idx)
-      println("Primeira fase resolvida")
+      verbose && println("Simplex de duas fases, minimizando obtejivo artificial W:", W)
+      verbose && println("Variaveis artificiais: ", artificial)
+      verbose && println("Base Inicial: ", base_idx)
+      tableau = solve_simplex(W, A, b, base_idx, verbose)
+      verbose && println("Primeira fase resolvida")
       c, A, b, base_idx, obj = update(c, tableau, artificial)
-      println("Iniciando segunda fase do simplex de duas fases")
+      verbose && println("Iniciando segunda fase do simplex de duas fases")
     end
 
-    tableau = solve_simplex(c, A, b, base_idx, obj)
+    tableau = solve_simplex(c, A, b, base_idx, verbose, obj)
     return tableau.obj * direction
   end
 
