@@ -6,4 +6,4 @@ eqs = ["<=", ">=", ">="]
 #println(size(c),size())
 include("simplexOrigem.jl")
 using Main.SimplexMethod
-SimplexMethod.simplex_method(c, A, b, eqs, "MAX")
+SimplexMethod.simplex_method(c, A, b, eqs, "MAX", 1)
