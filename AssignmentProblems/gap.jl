@@ -22,8 +22,15 @@ function gap_solver(data)
     set_silent(model)
     optimize!(model)
 
-    res = objective_value(model)
-    return res, res - data.lb
+    result = objective_value(model)
+    model_bound = objective_bound(model)
+    real_bound = data.lb
+
+    model_gap = result - model_bound
+    real_gap = result - real_bound
+    
+    jumps_gap = relative_gap(model)
+    return result, model_bound, real_bound, model_gap, real_gap, jumps_gap
 end
 
 #data = loadAssignmentProblem(:a05100)
@@ -32,13 +39,13 @@ end
 function evaluate_all_assignments()
     result = Dict()
     x = 0.0
-    for n in names(AssignmentProblems)
-        println(n)
+    for case in names(AssignmentProblems)
+        println(case)
         try
             x += 1
-            data = loadAssignmentProblem(n)
+            data = loadAssignmentProblem(case)
             ret = @timed gap_solver(data)
-            result[n] = [ret.time, ret.value...]
+            result[case] = [ret.time, ret.value...]
         catch
             # Invalid problem code
         end
@@ -50,5 +57,5 @@ res = evaluate_all_assignments()
 println(res)
 
 
-df = DataFrame( [(Case = k, Time=v[1], Value=v[2], Gap=v[3]) for (k,v) in res])
+df = DataFrame( [(Case = k, Time=v[1], Value=v[2], model_bound = v[3], real_bound = v[4], model_gap=v[5], real_gap=v[6], relative_gap =v[7]) for (k,v) in res])
 CSV.write("resultados.csv", df)
