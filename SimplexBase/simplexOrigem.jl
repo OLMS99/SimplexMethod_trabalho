@@ -284,7 +284,7 @@ module SimplexMethod
     end
 
     tableau = solve_simplex(c, A, b, base_idx, verbose - 1, obj)
-    return tableau.obj * direction
+    return tableau.obj * direction, tableau
   end
 
   function matrix_construction(constraints)
