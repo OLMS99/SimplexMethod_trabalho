@@ -89,7 +89,7 @@ module GomoryCuts
         start_time = time()
         result = 0
 
-        obj_value, tableau, status = SimplexMethod.simplex_method(c, A, b, sign, "MIN")
+        obj_value, tableau = SimplexMethod.simplex_method(c, A, b, sign, "MIN")
         while true
             global result = obj_value
 
@@ -119,7 +119,7 @@ module GomoryCuts
             A, b = cut_row(A, b, cut_idx)
 
             eqs = fill("<=", length(b))
-            obj_value, tableau, status = SimplexMethod.simplex_method(c, A, b, eqs, "MIN")
+            obj_value, tableau = SimplexMethod.simplex_method(c, A, b, eqs, "MIN")
         end
 
         elapsed_time = time() - start_time
