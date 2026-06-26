@@ -5,7 +5,7 @@ using HiGHS
 using CSV
 using DataFrames
 
-function find_cover(x_val, a, b; tol = 1e-4)
+function find_cover(x_val, a, b, tol = 1e-4)
     n, m = size(a) # agents x jobs
 
     violated_covers = Tuple{Int, Vector{Int}}[]
@@ -17,7 +17,7 @@ function find_cover(x_val, a, b; tol = 1e-4)
 
         # Minimize sum_j (1 - x*) * z_j
         @objective(submodel, Min, sum((1.0 - x_val[i, j]) * z[j] for j in 1:m))
-        @constraint(submodel, sum(a[i, j] * z[j] for j in 1:m) >= b[i])
+        @constraint(submodel, sum(a[i, j] * z[j] for j in 1:m) >= b[i] + tol)
 
         set_silent(submodel)
         optimize!(submodel)
@@ -51,8 +51,10 @@ function gap_solver_cover(data, time_limit = -1)
     @constraint(model, [j in num_jobs], sum(x[i,j] for i in num_agents) == 1)
     
     set_silent(model)
+    set_time_limit_sec(model, time_limit)
 
     start_time = time()
+    
     optimize!(model)
 
     while true
@@ -76,6 +78,12 @@ function gap_solver_cover(data, time_limit = -1)
         if ((time_limit > 0) && (curr_time - start_time > time_limit)) break end
     end
 
+    for i in num_agents, j in num_jobs
+        set_binary(x[i, j])
+    end
+    #unset_silent(model)
+    optimize!(model)
+
     result = objective_value(model)
     model_bound = objective_bound(model)
     real_bound = data.lb
@@ -87,8 +95,8 @@ function gap_solver_cover(data, time_limit = -1)
     return result, model_bound, real_bound, model_gap, real_gap, jumps_gap
 end
 
-#data = loadAssignmentProblem(:a05100)
-#println(gap_solver_cover(data, 5))
+data = loadAssignmentProblem(:c0520_5)
+println(@timed gap_solver_cover(data, 5))
 
 function evaluate_all_assignments()
     result = Dict()
@@ -107,8 +115,8 @@ function evaluate_all_assignments()
     return result
 end
 
-res = evaluate_all_assignments()
-println(res)
+#res = evaluate_all_assignments()
+#println(res)
 
-df = DataFrame( [(Case = k, Time=v[1], Value=v[2], model_bound = v[3], real_bound = v[4], model_gap=v[5], real_gap=v[6], relative_gap =v[7]) for (k,v) in res])
-CSV.write("resultados.csv", df)
+#df = DataFrame( [(Case = k, Time=v[1], Value=v[2], model_bound = v[3], real_bound = v[4], model_gap=v[5], real_gap=v[6], relative_gap =v[7]) for (k,v) in res])
+#CSV.write("resultados.csv", df)
