@@ -60,7 +60,8 @@ function gap_solver_cover(data, time_limit = -1)
     while true
         xval = value.(x)
 
-        covers = find_cover(xval, data.consumptions, data.capacities)
+        remains = max(5, time() - start_time)
+        covers = find_cover(xval, data.consumptions, data.capacities, remains)
 
         if length(covers) < 1 
             println("No new cover cut found!")
@@ -82,6 +83,8 @@ function gap_solver_cover(data, time_limit = -1)
         set_binary(x[i, j])
     end
     #unset_silent(model)
+    remains = max(5, time() - start_time)
+    set_time_limit_sec(model, remains)
     optimize!(model)
 
     result = objective_value(model)
@@ -95,8 +98,8 @@ function gap_solver_cover(data, time_limit = -1)
     return result, model_bound, real_bound, model_gap, real_gap, jumps_gap
 end
 
-data = loadAssignmentProblem(:c0520_5)
-println(@timed gap_solver_cover(data, 5))
+#data = loadAssignmentProblem(:c0520_5)
+#println(@timed gap_solver_cover(data, 5))
 
 function evaluate_all_assignments()
     result = Dict()
@@ -115,8 +118,8 @@ function evaluate_all_assignments()
     return result
 end
 
-#res = evaluate_all_assignments()
-#println(res)
+res = evaluate_all_assignments()
+println(res)
 
-#df = DataFrame( [(Case = k, Time=v[1], Value=v[2], model_bound = v[3], real_bound = v[4], model_gap=v[5], real_gap=v[6], relative_gap =v[7]) for (k,v) in res])
-#CSV.write("resultados.csv", df)
+df = DataFrame( [(Case = k, Time=v[1], Value=v[2], model_bound = v[3], real_bound = v[4], model_gap=v[5], real_gap=v[6], relative_gap =v[7]) for (k,v) in res])
+CSV.write("resultados.csv", df)
