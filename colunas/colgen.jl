@@ -3,6 +3,27 @@ using JuMP
 using HiGHS
 using Knapsacks
 
+function solveBinaryModel(data::Knapsack)
+    I = collect(1:ni(data))
+    W = data.capacity
+    w = data.weights
+    p = data.profits
+
+    model = Model(HiGHS.Optimizer)
+
+    @variable(model, x[j in I], Bin)
+    @objective(model, Max, sum(p[j] * x[j] for j in I))
+    @constraint(model, sum(w[j] * x[j] for j in I) <= W)
+
+    set_silent(model)
+
+    optimize!(model)
+    if termination_status(model) == MOI.OPTIMAL
+        result = [ j for j in I if value(x[j]) > 1e-7 ]
+        return round(Int64, objective_value(model)), result
+    end
+end
+
 function solvePricingSubproblem(Q, q, c, pi_dual, delta_dual, strategy)
     n = length(q)
     profits = zeros(Int64, n)
@@ -17,8 +38,7 @@ function solvePricingSubproblem(Q, q, c, pi_dual, delta_dual, strategy)
     knap = Knapsack(Q, q, profits)
 
     if strategy == :BinaryModel
-
-        value, subset = solveKnapsack(knap, strategy)
+        value, subset = solveBinaryModel(knap)
     else
         value, subset = solveKnapsack(knap, strategy)
     end
@@ -46,7 +66,7 @@ function updateVectors!(subsets, xs, ys, costs, subset, agent, cost, n_jobs, n_a
     push!(ys, y)
 end
 
-function generateColumn!(model, pi, delta, subset, agent, cost, new_id)
+function generateColumn!(model, lambdas, pi, delta, subset, agent, cost, new_id)
     var = @variable(model, lower_bound = 0.0)
     set_name(var, "λ[$new_id]")
 
@@ -56,6 +76,8 @@ function generateColumn!(model, pi, delta, subset, agent, cost, new_id)
         set_normalized_coefficient(pi[elem], var, 1.0)
     end
     set_normalized_coefficient(delta[agent], var, 1.0)
+
+    push!(lambdas, var)
 end
 
 function solve(data, time_limit = -1)
@@ -68,7 +90,7 @@ function solve(data, time_limit = -1)
     xs = []
     ys = []
     costs = []
-
+    lambdas = []
 
     agent_cap = copy(data.capacities)
     init_jobs = [Int64[] for _ in Agents]
@@ -84,7 +106,7 @@ function solve(data, time_limit = -1)
         end
         if !assigned
             error("Failed to initialize")
-            return
+            return nothing, nothing, nothing, nothing, nothing, nothing
         end
     end
 
@@ -98,18 +120,25 @@ function solve(data, time_limit = -1)
     model = Model(HiGHS.Optimizer)
 
     @variable(model, lambda[omegas] >= 0)
+    push!(lambdas, lambda)
+
     @objective(model, Min, sum(costs[s] * lambda[s] for s in omegas))
     
     @constraint(model, pi[j in Jobs], sum(xs[s][j] * lambda[s] for s in omegas) == 1)
     @constraint(model, delta[i in Agents], sum(ys[s][i] * lambda[s] for s in omegas) == 1)
 
     set_silent(model)
+    set_time_limit_sec(model, time_limit)
 
     start_time = time()
 
     strategy = :Heuristic
     while true
         optimize!(model)
+
+        # Early stop after optimizing but before changing model
+        curr_time = time()
+        if ((time_limit > 0) && (curr_time - start_time > time_limit)) break end
 
         pi_dual = dual.(pi)
         delta_dual = dual.(delta)
@@ -134,11 +163,9 @@ function solve(data, time_limit = -1)
             end
         end
         
-        println(best_rc)
         if best_rc >= -1e-5
             if strategy == :Heuristic
-                println("Heuristic exhausted, changing to full solver")
-                strategy = :ExpandingCore
+                strategy = :BinaryModel
             else
                 println("Column generation finished")
                 break 
@@ -146,18 +173,46 @@ function solve(data, time_limit = -1)
         else
             updateVectors!(subsets, xs, ys, costs, best_subset, best_agent, best_cost, n_jobs, n_agents)
 
-            generateColumn!(model, pi, delta, best_subset, best_agent, best_cost, length(subsets))
+            generateColumn!(model, lambdas, pi, delta, best_subset, best_agent, best_cost, length(subsets))
 
             strategy = :Heuristic
         end
 
-        curr_time = time()
-        if ((time_limit > 0) && (curr_time - start_time > time_limit)) break end
     end
 
-    println("lb = ", objective_value(model))
-    println(data.lb)
+    result = objective_value(model)
+    model_bound = objective_bound(model)
+    real_bound = data.ub
+
+    model_gap = result - model_bound
+    real_gap = result - real_bound
+    
+    jumps_gap = relative_gap(model)
+    return result, model_bound, real_bound, model_gap, real_gap, jumps_gap
 end
 
-data = loadAssignmentProblem(:a05100)
-solve(data)
+#data = loadAssignmentProblem(:a05100)
+#println(solve(data, 60))
+
+function evaluate_all_assignments()
+    result = Dict()
+    x = 0.0
+    for case in names(AssignmentProblems)
+        println(case)
+        try
+            x += 1
+            data = loadAssignmentProblem(case)
+            ret = @timed solve(data, 60)
+            result[case] = [ret.time, ret.value...]
+        catch
+            # Invalid problem code
+        end
+    end
+    return result
+end
+
+res = evaluate_all_assignments()
+println(res)
+
+df = DataFrame( [(Case = k, Time=v[1], Value=v[2], model_bound = v[3], real_bound = v[4], model_gap=v[5], real_gap=v[6], relative_gap =v[7]) for (k,v) in res])
+CSV.write("resultados.csv", df)
