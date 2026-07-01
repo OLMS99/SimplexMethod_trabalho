@@ -92,29 +92,16 @@ function solve(data, time_limit = -1)
     costs = []
     lambdas = []
 
-    agent_cap = copy(data.capacities)
+    i = 1
     init_jobs = [Int64[] for _ in Agents]
+    ## Initialize all jobs to a single agent with astronomical cost
     for j in Jobs
-        assigned = false
-        for i in Agents
-            if data.consumptions[i, j] <= agent_cap[i]
-                push!(init_jobs[i], j)
-                agent_cap[i] -= data.consumptions[i, j]
-                assigned = true
-                break
-            end
-        end
-        if !assigned
-            error("Failed to initialize")
-            return nothing, nothing, nothing, nothing, nothing, nothing
-        end
+        push!(init_jobs[i], j)
     end
 
-    for i in Agents
-        cost = sum(data.costs[i, j] for j in init_jobs[i]; init = 0.0)
-        updateVectors!(subsets, xs, ys, costs, init_jobs[i], i, cost, n_jobs, n_agents)
-    end
-
+    cost = sum(2*data.costs[i, j] for i in Agents, j in Jobs; init = 0.0)
+    updateVectors!(subsets, xs, ys, costs, init_jobs[i], i, cost, n_jobs, n_agents)
+    
     omegas = 1:length(subsets)
 
     model = Model(HiGHS.Optimizer)
@@ -155,7 +142,7 @@ function solve(data, time_limit = -1)
 
             red_cost, subset, cost = solvePricingSubproblem(Q, q, c, pi_dual, delta_dual[i], strategy)
 
-            if red_cost < best_rc
+            if red_cost < -1e-5
                 best_rc = red_cost
                 best_agent = i
                 best_subset = subset
@@ -179,6 +166,11 @@ function solve(data, time_limit = -1)
         end
 
     end
+
+    for var in lambdas
+        set_binary.(var)
+    end
+    optimize!(model)
 
     result = objective_value(model)
     model_bound = objective_bound(model)
